@@ -45,6 +45,8 @@ def build_workflow(extracted_request: ExtractedRequest) -> dict:
         "current_step_index": 0,
         "completed_steps": [],
         "failed_steps": [],
+        "runtime_data": {},
+        "action_logs": [],
     }
 
     return workflow
