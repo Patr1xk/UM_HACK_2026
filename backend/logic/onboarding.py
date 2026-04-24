@@ -6,65 +6,6 @@ def _now() -> str:
     return datetime.utcnow().isoformat()
 
 
-def init_onboarding_tables():
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS employees (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_name TEXT NOT NULL,
-        department TEXT NOT NULL,
-        start_date TEXT NOT NULL,
-        created_at TEXT NOT NULL
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS laptop_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (employee_id) REFERENCES employees(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS email_accounts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id INTEGER NOT NULL,
-        email_address TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (employee_id) REFERENCES employees(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS payroll_setups (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (employee_id) REFERENCES employees(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS building_access_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (employee_id) REFERENCES employees(id)
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
 def _get_entities(workflow: dict) -> dict:
     return workflow.get("entities", {})
 
@@ -89,8 +30,6 @@ def _generate_email(employee_name: str) -> str:
 
 
 def create_employee_record(workflow: dict) -> dict:
-    init_onboarding_tables()
-
     entities = _get_entities(workflow)
     employee_name = entities.get("employee_name", "")
     department = entities.get("department", "")
@@ -129,8 +68,6 @@ def create_employee_record(workflow: dict) -> dict:
 
 
 def create_laptop_request(workflow: dict) -> dict:
-    init_onboarding_tables()
-
     employee_id = _require_employee_id(workflow)
 
     conn = get_connection()
@@ -159,8 +96,6 @@ def create_laptop_request(workflow: dict) -> dict:
 
 
 def create_email_account(workflow: dict) -> dict:
-    init_onboarding_tables()
-
     employee_id = _require_employee_id(workflow)
     entities = _get_entities(workflow)
     employee_name = entities.get("employee_name", "")
@@ -200,8 +135,6 @@ def create_email_account(workflow: dict) -> dict:
 
 
 def create_payroll_setup(workflow: dict) -> dict:
-    init_onboarding_tables()
-
     employee_id = _require_employee_id(workflow)
 
     conn = get_connection()
@@ -230,8 +163,6 @@ def create_payroll_setup(workflow: dict) -> dict:
 
 
 def request_building_access(workflow: dict) -> dict:
-    init_onboarding_tables()
-
     employee_id = _require_employee_id(workflow)
 
     conn = get_connection()

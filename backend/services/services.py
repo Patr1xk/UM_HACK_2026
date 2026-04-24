@@ -1,4 +1,4 @@
-from glm.extractor import extract_request
+from glm.extractor import extract_request, generate_clarification, merge_partial_entities, decide_onboarding_steps
 from schemas.schemas import ExtractedRequest
 from orchestrator.orchestrator import build_workflow, execute_onboarding_workflow
 from db.sqlite_store import save_workflow, get_workflow
@@ -22,27 +22,113 @@ from logic.screening import (
 # Onboarding Services
 # ---------------------------------------------------------------------------
 
-#Validation
+ONBOARDING_REQUIRED_FIELDS = ["employee_name", "department", "start_date"]
+
+
 def process_user_request(user_message: str) -> ExtractedRequest:
-    """
-    1. Receive raw user text
-    2. Call GLM unified extractor
-    3. Validate the extracted JSON with Pydantic
-    4. Return validated structured request
-    """
+    """Process initial HR request and extract workflow intent."""
     if not user_message or not user_message.strip():
         raise ValueError("User message cannot be empty.")
-    
+
     raw_result = extract_request(user_message)
     validated_result = ExtractedRequest.model_validate(raw_result)
     workflow = build_workflow(validated_result)
     save_workflow(workflow)
 
+    if validated_result.workflow_type == "onboarding":
+        missing = _check_onboarding_prerequisites(validated_result)
+        if missing:
+            # Generate clarification request instead of crashing
+            clarification = generate_clarification(
+                missing, validated_result.entities.model_dump()
+            )
+            workflow["status"] = "awaiting_clarification"
+            workflow["clarification"] = {
+                "missing_fields": missing,
+                "question": clarification
+            }
+            save_workflow(workflow)
+            return workflow
+
     workflow = execute_onboarding_workflow(workflow)
     return workflow
+
+
+def resume_workflow_with_clarification(workflow_id: str, user_response: str) -> dict:
+    """Resume a workflow with user-provided clarification."""
+    if not user_response or not user_response.strip():
+        raise ValueError("Clarification response cannot be empty.")
+
+    workflow = get_workflow(workflow_id)
+    if not workflow:
+        raise ValueError(f"Workflow {workflow_id} not found.")
+
+    if workflow["status"] != "awaiting_clarification":
+        raise ValueError(f"Workflow {workflow_id} is not awaiting clarification (status: {workflow['status']}).")
+
+    # Use GLM to merge the user's clarification response with existing entities
+    missing_fields = workflow.get("clarification", {}).get("missing_fields", [])
+    merged_entities = merge_partial_entities(
+        missing_fields,
+        workflow["entities"],
+        user_response
+    )
+
+    # Update workflow with merged entities
+    workflow["entities"] = merged_entities
+    workflow["user_clarification"] = {
+        "original_question": workflow.get("clarification", {}).get("question"),
+        "user_response": user_response
+    }
+
+    # Re-check prerequisites
+    extracted = ExtractedRequest.model_validate({
+        "workflow_type": workflow["workflow_type"],
+        "intent_summary": workflow["intent_summary"],
+        "confidence": workflow["confidence"],
+        "entities": merged_entities,
+        "missing_fields": [],
+        "next_action": workflow["next_action"]
+    })
+
+    missing = _check_onboarding_prerequisites(extracted)
+    if missing:
+        # Still missing required fields - ask again
+        clarification = generate_clarification(missing, merged_entities)
+        workflow["status"] = "awaiting_clarification"
+        workflow["clarification"] = {
+            "missing_fields": missing,
+            "question": clarification
+        }
+        workflow["steps"] = []  # Keep steps empty until clarification complete
+        save_workflow(workflow)
+        return workflow
     
-#test
+    # Decide steps now that we have complete data
+    workflow["steps"] = decide_onboarding_steps(merged_entities)
+    workflow["status"] = "in_progress"
+    workflow["clarification"] = {}  # Clear clarification
+    save_workflow(workflow)
+
+    workflow = execute_onboarding_workflow(workflow)
+    return workflow
+
+
+def _check_onboarding_prerequisites(extracted: ExtractedRequest) -> list[str]:
+    """Check if required onboarding fields are present and non-empty."""
+    missing = []
+    entities = extracted.entities
+    if not entities.employee_name or not entities.employee_name.strip():
+        missing.append("employee_name")
+    if not entities.department or not entities.department.strip():
+        missing.append("department")
+    if not entities.start_date or not entities.start_date.strip():
+        missing.append("start_date")
+    return missing
+
+
 def fetch_workflow(workflow_id: str):
+    """Fetch workflow by ID."""
     return get_workflow(workflow_id)
 
 

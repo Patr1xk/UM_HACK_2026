@@ -1,36 +1,27 @@
 from uuid import uuid4
 from schemas.schemas import ExtractedRequest
-from logic.onboarding import ONBOARDING_STEP_MAP, init_onboarding_tables
+from logic.onboarding import ONBOARDING_STEP_MAP
+from glm.extractor import decide_onboarding_steps, validate_step_output, glm_reason_next_action
 from db.sqlite_store import save_workflow
 
+
 def build_workflow(extracted_request: ExtractedRequest) -> dict:
+    """Build a workflow from extracted request, using GLM to decide steps for onboarding."""
     workflow_id = f"wf_{uuid4().hex[:8]}"
 
     if extracted_request.workflow_type == "onboarding":
-        steps = [
-            "create_employee_record",
-            "create_laptop_request",
-            "create_email_account",
-            "create_payroll_setup",
-            "request_building_access",
-        ]
-        status = "in_progress"
-
-    elif extracted_request.workflow_type == "resume_screening":
-        steps = [
-                "extract_job_requirements",
-                "extract_candidate_details",
-                "evaluate_candidate_fit",
-                "decide_candidate_outcome",
-                "schedule_interview",
-                "send_candidate_email",
-                "create_calendar_event"
-            ]
+        # Only decide steps if we have all required fields
+        # If missing fields exist, we'll decide steps after clarification
+        if not extracted_request.missing_fields:
+            steps = decide_onboarding_steps(extracted_request.entities.model_dump())
+        else:
+            steps = []  # Don't decide steps until clarification provided
         status = "in_progress"
 
     else:
+        # Other workflow types not yet implemented
         steps = []
-        status = "fallback"
+        status = "not_implemented"
 
     workflow = {
         "workflow_id": workflow_id,
@@ -47,37 +38,41 @@ def build_workflow(extracted_request: ExtractedRequest) -> dict:
         "failed_steps": [],
         "runtime_data": {},
         "action_logs": [],
+        "clarification": {},
+        "user_clarification": {},
     }
 
     return workflow
 
-#Onboarding steps
+
 def execute_onboarding_workflow(workflow: dict) -> dict:
+    """Execute onboarding workflow with GLM-driven reasoning at each step."""
     workflow_type = workflow.get("workflow_type")
 
+    # Handle unknown workflow types
     if workflow_type == "unknown":
-        workflow["status"] = "fallback"
-        workflow["action_logs"].append({
-            "step": "fallback",
-            "status": "success",
-            "message": "Unsupported workflow type. No execution performed."
-        })
-        save_workflow(workflow)
-        return workflow
-
-    if workflow_type == "onboarding":
-        init_onboarding_tables()
-        step_map = ONBOARDING_STEP_MAP
-    else:
         workflow["status"] = "not_implemented"
-        workflow["failed_steps"].append({
-            "step": "workflow_execution",
-            "status": "failed",
-            "message": f"Execution for workflow_type='{workflow_type}' is not implemented yet."
+        workflow["action_logs"].append({
+            "step": "workflow_dispatch",
+            "status": "skipped",
+            "message": "Unknown workflow type. Execution skipped."
         })
         save_workflow(workflow)
         return workflow
 
+    # Handle non-onboarding workflows (resume_screening not yet implemented)
+    if workflow_type != "onboarding":
+        workflow["status"] = "not_implemented"
+        workflow["action_logs"].append({
+            "step": "workflow_dispatch",
+            "status": "skipped",
+            "message": f"Workflow type '{workflow_type}' is not yet implemented."
+        })
+        save_workflow(workflow)
+        return workflow
+
+    # Execute onboarding workflow
+    step_map = ONBOARDING_STEP_MAP
     workflow["status"] = "in_progress"
     save_workflow(workflow)
 
@@ -104,6 +99,30 @@ def execute_onboarding_workflow(workflow: dict) -> dict:
             runtime_updates = result.get("runtime_updates", {})
             if runtime_updates:
                 workflow["runtime_data"].update(runtime_updates)
+
+            # GLM validates step output BEFORE proceeding
+            validation = validate_step_output(
+                step_name, result, workflow["entities"]
+            )
+            if not validation.get("valid"):
+                # GLM flagged an issue - log warning but continue
+                result["validation_warning"] = validation.get("reason", "GLM flagged issue")
+
+            # GLM reasons about whether to proceed to next step
+            proceed_decision = glm_reason_next_action(
+                step_name, result, workflow, index, len(steps)
+            )
+
+            if not proceed_decision.get("should_proceed", True):
+                workflow["status"] = "paused"
+                workflow["action_logs"].append({
+                    "step": step_name,
+                    "status": "paused",
+                    "reason": proceed_decision.get("reason", "GLM recommended pause"),
+                    "result": result
+                })
+                save_workflow(workflow)
+                return workflow
 
             workflow["completed_steps"].append(result)
             workflow["action_logs"].append(result)

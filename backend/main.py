@@ -1,19 +1,22 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from api.api import router as workflow_router
-from db.sqlite_store import init_db
+from api.screening_api import router as screening_router
+from db.sqlite_store import init_db, init_onboarding_tables
 
-app = FastAPI(title="HR Workflow Engine API")
-
-
-@app.on_event("startup")
-def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     init_db()
+    init_onboarding_tables()
+    yield
+
+app = FastAPI(title="HR Workflow Engine API", lifespan=lifespan)
 
 
 @app.get("/")
 def root():
     return {"message": "HR Workflow Engine API is running."}
 
-
 app.include_router(workflow_router)
+app.include_router(screening_router)

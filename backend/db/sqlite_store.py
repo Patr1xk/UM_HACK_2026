@@ -26,7 +26,71 @@ def init_db():
         steps_json TEXT NOT NULL,
         current_step_index INTEGER NOT NULL,
         completed_steps_json TEXT NOT NULL,
-        failed_steps_json TEXT NOT NULL
+        failed_steps_json TEXT NOT NULL,
+        runtime_data_json TEXT NOT NULL DEFAULT '{}',
+        action_logs_json TEXT NOT NULL DEFAULT '[]',
+        clarification_json TEXT NOT NULL DEFAULT '{}',
+        user_clarification_json TEXT NOT NULL DEFAULT '{}'
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def init_onboarding_tables():
+    """Initialize all onboarding-related tables."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS employees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_name TEXT NOT NULL,
+        department TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS laptop_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS email_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL,
+        email_address TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_setups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS building_access_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
     )
     """)
 
@@ -51,9 +115,13 @@ def save_workflow(workflow: dict):
         steps_json,
         current_step_index,
         completed_steps_json,
-        failed_steps_json
+        failed_steps_json,
+        runtime_data_json,
+        action_logs_json,
+        clarification_json,
+        user_clarification_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         workflow["workflow_id"],
         workflow["workflow_type"],
@@ -67,6 +135,10 @@ def save_workflow(workflow: dict):
         workflow["current_step_index"],
         json.dumps(workflow["completed_steps"]),
         json.dumps(workflow["failed_steps"]),
+        json.dumps(workflow.get("runtime_data", {})),
+        json.dumps(workflow.get("action_logs", [])),
+        json.dumps(workflow.get("clarification", {})),
+        json.dumps(workflow.get("user_clarification", {})),
     ))
 
     conn.commit()
@@ -97,4 +169,8 @@ def get_workflow(workflow_id: str):
         "current_step_index": row[9],
         "completed_steps": json.loads(row[10]),
         "failed_steps": json.loads(row[11]),
+        "runtime_data": json.loads(row[12]) if len(row) > 12 else {},
+        "action_logs": json.loads(row[13]) if len(row) > 13 else [],
+        "clarification": json.loads(row[14]) if len(row) > 14 else {},
+        "user_clarification": json.loads(row[15]) if len(row) > 15 else {},
     }
