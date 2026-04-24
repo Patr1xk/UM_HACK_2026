@@ -1,8 +1,7 @@
 from glm.extractor import extract_request
 from schemas.schemas import ExtractedRequest
-from orchestrator.orchestrator import build_workflow
+from orchestrator.orchestrator import build_workflow, execute_onboarding_workflow
 from db.sqlite_store import save_workflow, get_workflow
-# from logic.onboarding import execute_onboarding_workflow
 
 #Validation
 def process_user_request(user_message: str) -> ExtractedRequest:
@@ -20,7 +19,7 @@ def process_user_request(user_message: str) -> ExtractedRequest:
     workflow = build_workflow(validated_result)
     save_workflow(workflow)
 
-    # workflow = execute_onboarding_workflow(workflow)
+    workflow = execute_onboarding_workflow(workflow)
     return workflow
     
 #test

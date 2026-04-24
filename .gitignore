@@ -1,2 +1,10 @@
 **/.env
 .venv/
+frontend/
+venv/
+__pycache__/
+*.pyc
+*.db
+credentials.json
+token.json
+uploads/
