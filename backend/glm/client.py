@@ -1,18 +1,20 @@
 import os
 from dotenv import load_dotenv
-from zai import ZaiClient
+from openai import OpenAI
 
 load_dotenv()
 
 class GLMClient:
-    def __init__(self, model: str = "glm-4.7-flash", thinking_enabled: bool = False):
-        api_key = os.getenv("ZAI_GLM_API_KEY")
+    def __init__(self, model: str = "ilmu-glm-5.1"):
+        api_key = os.getenv("ILMU_API_KEY")
         if not api_key:
-            raise ValueError("ZAI_GLM_API_KEY is not set in environment variables.")
+            raise ValueError("ILMU_API_KEY is not set in environment variables.")
 
-        self.client = ZaiClient(api_key=api_key)
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.ilmu.ai/v1",
+        )
         self.model = model
-        self.thinking_enabled = thinking_enabled
 
     def send_messages(
         self,
@@ -25,12 +27,16 @@ class GLMClient:
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "thinking": {
-                "type": "enabled" if self.thinking_enabled else "disabled"
-            },
         }
 
-        return self.client.chat.completions.create(**payload)
+        response = self.client.chat.completions.create(**payload)
+
+        # Debug: Print response details
+        print(f"DEBUG: response.choices = {response.choices}")
+        if response.choices:
+            print(f"DEBUG: message.content = {repr(response.choices[0].message.content)}")
+
+        return response
 
     def chat(
         self,
