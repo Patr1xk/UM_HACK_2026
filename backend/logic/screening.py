@@ -11,6 +11,7 @@ Handles resume screening logic:
 """
 
 import json
+import os
 import random
 from datetime import datetime, timedelta
 
@@ -307,27 +308,28 @@ def parse_resume(workflow: dict) -> dict:
     if not raw_text:
         raise ValueError("Could not extract any text from the PDF.")
 
+    filename = os.path.basename(pdf_path)
     return {
         "step": "parse_resume",
         "status": "success",
-        "message": f"Parsed resume from {pdf_path.split('/')[-1]} ({len(raw_text)} chars extracted).",
+        "message": f"Parsed resume from {filename} ({len(raw_text)} chars extracted).",
         "runtime_updates": {
             "resume_raw_text": raw_text,
-            "resume_filename": pdf_path.split("/")[-1],
+            "resume_filename": filename,
         }
     }
 
 
 def extract_candidate_details(workflow: dict) -> dict:
-    """Step 2: Use GLM to extract structured candidate profile from raw text."""
-    from glm.client import GLMClient
+    """Step 2: Use Groq to extract structured candidate profile from raw text."""
+    from glm.client import GroqClient
 
     runtime_data = _get_runtime_data(workflow)
     raw_text = runtime_data.get("resume_raw_text")
     if not raw_text:
         raise ValueError("resume_raw_text not found. Run parse_resume first.")
 
-    glm = GLMClient(model="ilmu-glm-5.1")
+    glm = GroqClient()
 
     system_message = """Extract resume data as JSON. Return ONLY valid JSON, no markdown or explanation.
 {
@@ -363,8 +365,8 @@ def extract_candidate_details(workflow: dict) -> dict:
 
 
 def evaluate_candidate_fit(workflow: dict) -> dict:
-    """Step 3: GLM scores candidate against role requirements."""
-    from glm.client import GLMClient
+    """Step 3: Groq scores candidate against role requirements."""
+    from glm.client import GroqClient
 
     runtime_data = _get_runtime_data(workflow)
     candidate = runtime_data.get("candidate")
@@ -379,7 +381,7 @@ def evaluate_candidate_fit(workflow: dict) -> dict:
     if not role:
         raise ValueError(f"Role '{role_name}' not found.")
 
-    glm = GLMClient(model="ilmu-glm-5.1")
+    glm = GroqClient()
 
     system_message = """Evaluate candidate fit for the role. Return ONLY valid JSON, no explanation.
 {
@@ -494,9 +496,8 @@ def send_candidate_email(workflow: dict) -> dict:
     """
     Step 6: Send interview invitation email via Gmail API (OAuth2).
     Requires: credentials.json + token.json from Google Cloud Console.
+    Gracefully skips if Google credentials are not configured.
     """
-    from glm.google_client import send_gmail
-
     runtime_data = _get_runtime_data(workflow)
 
     if runtime_data.get("decision") != "shortlisted":
@@ -508,48 +509,60 @@ def send_candidate_email(workflow: dict) -> dict:
 
     info = runtime_data.get("interview_info")
     if not info:
-        raise ValueError("interview_info not found. Run schedule_interview first.")
-
-    subject = f"Interview Invitation — {info['role_name']} Position at HireFlow"
-    body = (
-        f"Dear {info['candidate_name']},\n\n"
-        f"We are pleased to inform you that your application for the {info['role_name']} position "
-        f"has been reviewed and we would like to invite you for an interview.\n\n"
-        f"Interview Details:\n"
-        f"  Date & Time : {info['display_time']}\n"
-        f"  Duration    : 1 hour (ends {info['display_end']})\n"
-        f"  Format      : Video Call (Google Meet link will be shared separately)\n\n"
-        f"Please reply to this email to confirm your attendance or to request a reschedule.\n\n"
-        f"We look forward to speaking with you.\n\n"
-        f"Best regards,\n"
-        f"HireFlow HR Team\n"
-        f"hr@hireflow.com"
-    )
-
-    result = send_gmail(
-        to=info["candidate_email"],
-        subject=subject,
-        body=body,
-    )
-
-    return {
-        "step": "send_candidate_email",
-        "status": "success",
-        "message": f"Interview invitation email sent to {info['candidate_email']}.",
-        "runtime_updates": {
-            "email_sent": True,
-            "email_message_id": result.get("id", ""),
+        return {
+            "step": "send_candidate_email",
+            "status": "skipped",
+            "message": "interview_info not found. Skipping email.",
         }
-    }
+
+    try:
+        from glm.google_client import send_gmail
+
+        subject = f"Interview Invitation — {info['role_name']} Position at HireFlow"
+        body = (
+            f"Dear {info['candidate_name']},\n\n"
+            f"We are pleased to inform you that your application for the {info['role_name']} position "
+            f"has been reviewed and we would like to invite you for an interview.\n\n"
+            f"Interview Details:\n"
+            f"  Date & Time : {info['display_time']}\n"
+            f"  Duration    : 1 hour (ends {info['display_end']})\n"
+            f"  Format      : Video Call (Google Meet link will be shared separately)\n\n"
+            f"Please reply to this email to confirm your attendance or to request a reschedule.\n\n"
+            f"We look forward to speaking with you.\n\n"
+            f"Best regards,\n"
+            f"HireFlow HR Team\n"
+            f"hr@hireflow.com"
+        )
+
+        result = send_gmail(
+            to=info["candidate_email"],
+            subject=subject,
+            body=body,
+        )
+
+        return {
+            "step": "send_candidate_email",
+            "status": "success",
+            "message": f"Interview invitation email sent to {info['candidate_email']}.",
+            "runtime_updates": {
+                "email_sent": True,
+                "email_message_id": result.get("id", ""),
+            }
+        }
+    except Exception as e:
+        return {
+            "step": "send_candidate_email",
+            "status": "skipped",
+            "message": f"Email not sent (Google API unavailable: {type(e).__name__}). Interview is still scheduled.",
+        }
 
 
 def create_calendar_event(workflow: dict) -> dict:
     """
     Step 7: Create a Google Calendar event and send invite to candidate.
     Requires: credentials.json + token.json from Google Cloud Console.
+    Gracefully skips if Google credentials are not configured.
     """
-    from glm.google_client import create_google_calendar_event
-
     runtime_data = _get_runtime_data(workflow)
 
     if runtime_data.get("decision") != "shortlisted":
@@ -561,28 +574,41 @@ def create_calendar_event(workflow: dict) -> dict:
 
     info = runtime_data.get("interview_info")
     if not info:
-        raise ValueError("interview_info not found. Run schedule_interview first.")
-
-    event = create_google_calendar_event(
-        summary=f"Interview — {info['candidate_name']} ({info['role_name']})",
-        description=(
-            f"Interview with {info['candidate_name']} for the {info['role_name']} position.\n"
-            f"Candidate Email: {info['candidate_email']}"
-        ),
-        start_datetime=info["interview_datetime"],
-        end_datetime=info["end_datetime"],
-        attendee_email=info["candidate_email"],
-    )
-
-    return {
-        "step": "create_calendar_event",
-        "status": "success",
-        "message": f"Google Calendar event created. Event ID: {event.get('id', '')}",
-        "runtime_updates": {
-            "calendar_event_id": event.get("id", ""),
-            "calendar_event_link": event.get("htmlLink", ""),
+        return {
+            "step": "create_calendar_event",
+            "status": "skipped",
+            "message": "interview_info not found. Skipping calendar event.",
         }
-    }
+
+    try:
+        from glm.google_client import create_google_calendar_event
+
+        event = create_google_calendar_event(
+            summary=f"Interview — {info['candidate_name']} ({info['role_name']})",
+            description=(
+                f"Interview with {info['candidate_name']} for the {info['role_name']} position.\n"
+                f"Candidate Email: {info['candidate_email']}"
+            ),
+            start_datetime=info["interview_datetime"],
+            end_datetime=info["end_datetime"],
+            attendee_email=info["candidate_email"],
+        )
+
+        return {
+            "step": "create_calendar_event",
+            "status": "success",
+            "message": f"Google Calendar event created. Event ID: {event.get('id', '')}",
+            "runtime_updates": {
+                "calendar_event_id": event.get("id", ""),
+                "calendar_event_link": event.get("htmlLink", ""),
+            }
+        }
+    except Exception as e:
+        return {
+            "step": "create_calendar_event",
+            "status": "skipped",
+            "message": f"Calendar event not created (Google API unavailable: {type(e).__name__}). Interview is still scheduled.",
+        }
 
 
 # ---------------------------------------------------------------------------

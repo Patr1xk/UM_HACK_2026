@@ -31,6 +31,11 @@ export default function OfferAndOnboardingView({ candidate, onBack }: { candidat
     }
   }, [phase]);
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPhase('processing');
+  };
+
   const triggerOnboarding = async () => {
     const message = `Onboard ${formData.name} to ${formData.department} department starting ${formData.startDate}. Resources needed: laptop, email, payroll, building access.`;
 

@@ -2,12 +2,19 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { Resend } from "resend";
+import http from "http";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Log all incoming requests
+  app.use((req, res, next) => {
+    console.log(`[Request] ${req.method} ${req.path}`);
+    next();
+  });
 
   // Initialize Resend
   // It relies on RESEND_API_KEY from environment variables.
@@ -18,7 +25,10 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // IMPORTANT: This explicit route handler could be matching before proxy!
+  // Let's add logging here
   app.post("/api/send-reminder", async (req, res) => {
+    console.log("[send-reminder] Request received");
     const { targetEmail, targetName, taskTitle, dueDate, isInternal, employeeName } = req.body;
     
     if (!targetEmail || !taskTitle) {
@@ -69,6 +79,70 @@ async function startServer() {
     } catch (error) {
       console.error("Error sending email:", error);
       res.status(500).json({ error: "Failed to send email reminder", details: String(error) });
+    }
+  });
+
+  // Manual proxy to backend (http-proxy-middleware was incompatible)
+  app.use("/api", (req, res) => {
+    const options = {
+      hostname: "localhost",
+      port: 8000,
+      path: req.path,
+      method: req.method,
+      headers: {
+        ...req.headers,
+        host: "localhost:8000", // Override host header
+      },
+      timeout: 45000, // 45 second timeout
+    };
+
+    console.log(`[Proxy] Forwarding ${req.method} ${req.path} to http://localhost:8000${req.path}`);
+    console.log(`[Proxy] Headers:`, JSON.stringify(options.headers, null, 2));
+    console.log(`[Proxy] Content-Type:`, options.headers["content-type"]);
+
+    const proxyReq = http.request(options, (proxyRes) => {
+      console.log(`[Proxy] Got response: ${proxyRes.statusCode}`);
+      res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on("error", (err) => {
+      console.error("[Proxy Error]", err.message);
+      res.status(502).json({
+        error: "Bad Gateway",
+        message: err.message,
+      });
+    });
+
+    proxyReq.on("timeout", () => {
+      console.error("[Proxy Timeout]");
+      proxyReq.destroy();
+      res.status(504).json({
+        error: "Gateway Timeout",
+        message: "Backend did not respond within 45 seconds",
+      });
+    });
+
+    // Forward request body
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      // Check if body is JSON (parsed by express.json())
+      const isJson = req.get("content-type")?.includes("application/json");
+
+      if (isJson && req.body && typeof req.body === "object") {
+        // Body was parsed by express.json() - write it as JSON
+        const bodyData = JSON.stringify(req.body);
+        proxyReq.setHeader("Content-Length", Buffer.byteLength(bodyData));
+        console.log(`[Proxy] Forwarding parsed JSON body: ${bodyData.substring(0, 100)}...`);
+        proxyReq.write(bodyData);
+        proxyReq.end();
+      } else {
+        // Body is raw stream (e.g., FormData, multipart) - pipe it
+        console.log(`[Proxy] Forwarding raw body stream (FormData)`);
+        console.log(`[Proxy] req.body exists:`, !!req.body);
+        req.pipe(proxyReq);
+      }
+    } else {
+      proxyReq.end();
     }
   });
 

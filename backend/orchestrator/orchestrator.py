@@ -8,20 +8,25 @@ from db.sqlite_store import save_workflow
 def build_workflow(extracted_request: ExtractedRequest) -> dict:
     """Build a workflow from extracted request, using GLM to decide steps for onboarding."""
     workflow_id = f"wf_{uuid4().hex[:8]}"
+    steps = []
+    status = "not_implemented"
+
+    # Debug: Log extracted request
+    print(f"[DEBUG] Extracted request: workflow_type={extracted_request.workflow_type}")
+    print(f"[DEBUG] Entities: {extracted_request.entities}")
+    print(f"[DEBUG] Missing fields: {extracted_request.missing_fields}")
 
     if extracted_request.workflow_type == "onboarding":
+        status = "in_progress"
         # Only decide steps if we have all required fields
         # If missing fields exist, we'll decide steps after clarification
         if not extracted_request.missing_fields:
             steps = decide_onboarding_steps(extracted_request.entities.model_dump())
+            print(f"[DEBUG] Decided steps: {steps}")
         else:
             steps = []  # Don't decide steps until clarification provided
-        status = "in_progress"
-
-    else:
-        # Other workflow types not yet implemented
-        steps = []
-        status = "not_implemented"
+            print(f"[DEBUG] Missing fields detected, skipping step decision")
+            status = "awaiting_clarification"
 
     workflow = {
         "workflow_id": workflow_id,
@@ -100,30 +105,7 @@ def execute_onboarding_workflow(workflow: dict) -> dict:
             if runtime_updates:
                 workflow["runtime_data"].update(runtime_updates)
 
-            # GLM validates step output BEFORE proceeding
-            validation = validate_step_output(
-                step_name, result, workflow["entities"]
-            )
-            if not validation.get("valid"):
-                # GLM flagged an issue - log warning but continue
-                result["validation_warning"] = validation.get("reason", "GLM flagged issue")
-
-            # GLM reasons about whether to proceed to next step
-            proceed_decision = glm_reason_next_action(
-                step_name, result, workflow, index, len(steps)
-            )
-
-            if not proceed_decision.get("should_proceed", True):
-                workflow["status"] = "paused"
-                workflow["action_logs"].append({
-                    "step": step_name,
-                    "status": "paused",
-                    "reason": proceed_decision.get("reason", "GLM recommended pause"),
-                    "result": result
-                })
-                save_workflow(workflow)
-                return workflow
-
+            # Always proceed to next step (no GLM pause logic)
             workflow["completed_steps"].append(result)
             workflow["action_logs"].append(result)
             workflow["current_step_index"] = index + 1

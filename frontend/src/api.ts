@@ -1,14 +1,33 @@
 import type { WorkflowResponse, ScreeningResult, Role, RoleOverride, ReminderPayload } from './types/api';
 
 const API_BASE = '/api';
+const REQUEST_TIMEOUT = 20000; // 20 seconds
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, options);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `API error: ${res.status}`);
+  const url = `${API_BASE}${path}`;
+  console.log(`[API] Fetching: ${options?.method || 'GET'} ${url}`);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+  try {
+    console.log(`[API] About to call fetch...`);
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    console.log(`[API] Got response with status: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `API error: ${res.status}`);
+    }
+    return res.json();
+  } catch (err: any) {
+    console.error(`[API] Fetch error:`, err);
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timeout after ${REQUEST_TIMEOUT / 1000}s. Backend may be unresponsive.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,11 @@
 import json
-from glm.client import GLMClient
+from glm.client import GroqClient
 
-glm_client = GLMClient(model="ilmu-glm-5.1")
+try:
+    glm_client = GroqClient(model="llama-3.3-70b-versatile")
+except Exception as e:
+    print(f"[WARNING] Failed to initialize GroqClient: {e}")
+    glm_client = None
 
 
 def _parse_json_text(text: str) -> dict:
@@ -18,6 +22,7 @@ def _parse_json_text(text: str) -> dict:
 
 
 def extract_request(user_message: str) -> dict:
+    print(f"[DEBUG] extract_request called with: {user_message[:50]}...")
     system_message = """
                         You are an HR workflow extraction engine.
 
@@ -58,6 +63,9 @@ def extract_request(user_message: str) -> dict:
                         - Extract onboarding-related details only
                         - Fill employee_name, department, start_date, resources_needed if clearly present
                         - Use empty string or empty array for unknown values
+                        - REQUIRED fields: employee_name, department, start_date
+                        - OPTIONAL fields: resources_needed (default to empty array if not mentioned)
+                        - Only list REQUIRED fields in missing_fields if they're empty
                         - next_action must be "create_onboarding_workflow"
 
                         Resume screening rules:
@@ -92,7 +100,7 @@ def extract_request(user_message: str) -> dict:
         max_tokens=1000,
         temperature=0.0,
     )
-
+    print(f"[DEBUG] extract_request got response from Groq")
     return _parse_json_text(text)
 
 
@@ -141,48 +149,9 @@ def generate_clarification(missing_fields: list[str], partial_entities: dict) ->
 
 
 def decide_onboarding_steps(entities: dict) -> list[str]:
-    """Use GLM to decide which onboarding steps to run based on extracted resources_needed."""
-    resources = entities.get("resources_needed", [])
-
-    system_message = (
-        "You are an HR workflow engine. Given the extracted onboarding entities, "
-        "decide which onboarding steps to execute. Available steps: "
-        "create_employee_record, create_laptop_request, create_email_account, "
-        "create_payroll_setup, request_building_access. "
-        "create_employee_record is ALWAYS required and must be first. "
-        "Return ONLY a JSON array of step names in execution order. No explanation."
-    )
-
-    user_message = f"Entities: {json.dumps(entities)}\nResources needed: {json.dumps(resources)}"
-
-    text = glm_client.chat(
-        user_message=user_message,
-        system_message=system_message,
-        max_tokens=1000,
-        temperature=0.0,
-    )
-
-    try:
-        steps = json.loads(text.strip())
-        if isinstance(steps, list) and steps and steps[0] == "create_employee_record":
-            return steps
-    except json.JSONDecodeError:
-        pass
-
-    # Fallback: always include employee record + any matching resources
-    default = ["create_employee_record"]
-    resource_map = {
-        "laptop": "create_laptop_request",
-        "email": "create_email_account",
-        "payroll": "create_payroll_setup",
-        "building": "request_building_access",
-    }
-    for r in resources:
-        r_lower = r.lower()
-        for key, step in resource_map.items():
-            if key in r_lower and step not in default:
-                default.append(step)
-    return default if len(default) > 1 else [
+    """Return all 5 predefined onboarding steps in order."""
+    # Always execute all 5 steps for every onboarding workflow
+    return [
         "create_employee_record",
         "create_laptop_request",
         "create_email_account",

@@ -39,9 +39,13 @@ export default function GlmChatWidget() {
     setIsLoading(true);
 
     try {
+      console.log('[Chat] Message input:', text);
+      console.log('[Chat] Calling startWorkflow...');
       const result = await startWorkflow(text);
+      console.log('[Chat] Workflow response:', result);
       handleWorkflowResponse(result, text);
     } catch (err: any) {
+      console.error('[Chat] Caught error:', err);
       appendMsg('agent', `Error: ${err.message || 'Failed to start workflow.'}`);
     } finally {
       setIsLoading(false);
@@ -53,9 +57,12 @@ export default function GlmChatWidget() {
     appendMsg('user', response);
 
     try {
+      console.log('[Chat] Sending clarification:', workflowId, response);
       const result = await clarifyWorkflow(workflowId, response);
+      console.log('[Chat] Clarification response:', result);
       handleWorkflowResponse(result, response);
     } catch (err: any) {
+      console.error('[Chat] Error:', err);
       appendMsg('agent', `Error: ${err.message || 'Failed to submit clarification.'}`);
     } finally {
       setIsLoading(false);
