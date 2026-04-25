@@ -1,0 +1,10 @@
+[MASTER]
+init-hook='import sys; sys.path.insert(0, "c:\\Users\\60122\\OneDrive\\Documents\\UM_hackathon\\UM_HACK_2026\\backend")'
+load-plugins=pylint.extensions.docparams
+
+[MESSAGES CONTROL]
+disable=
+    C0114,
+    C0116,
+    C0305,
+    W0718
