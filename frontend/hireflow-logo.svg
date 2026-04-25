@@ -1,0 +1,16 @@
+<svg viewBox="0 0 768 768" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="768" height="768" fill="black"/>
+  
+  <!-- HireFlow Text -->
+  <text x="120" y="380" font-family="Arial, sans-serif" font-size="120" font-weight="bold" fill="white">Hire</text>
+  <text x="120" y="500" font-family="Arial, sans-serif" font-size="120" font-weight="bold" fill="white">flow</text>
+  
+  <!-- Registered Trademark Symbol -->
+  <circle cx="430" cy="260" r="25" fill="none" stroke="white" stroke-width="3"/>
+  <text x="420" y="280" font-family="Arial, sans-serif" font-size="30" fill="white">®</text>
+  
+  <!-- Hexagon with HF -->
+  <polygon points="550,250 650,200 700,300 650,400 550,450 500,350" fill="white" stroke="white" stroke-width="2"/>
+  <text x="560" y="360" font-family="Arial, sans-serif" font-size="80" font-weight="bold" fill="black">HF</text>
+</svg>
