@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
+import {
   ArrowLeft,
   Mail,
   CheckCircle2,
@@ -15,6 +15,8 @@ import {
   FileAxis3D
 } from 'lucide-react';
 import { OnboardingEmployee, OnboardingTask } from '../types/onboarding';
+import { getWorkflow } from '../api';
+import type { WorkflowResponse } from '../types/api';
 
 const FADE_UP_ANIMATION = {
   hidden: { opacity: 0, y: 8 },
@@ -42,9 +44,41 @@ interface TaskWithIcon extends OnboardingTask {
   targetName?: string;
 }
 
-export default function OnboardingDetailView({ employee, onBack }: { employee: OnboardingEmployee, onBack: () => void }) {
+export default function OnboardingDetailView({ employee, onBack }: { employee: any; onBack: () => void }) {
   // Mock detailed data
   const completedCountTarget = Math.floor((employee.progress || 0) / 20);
+
+  // If this employee has a real workflow, load and update task statuses
+  const workflowId = employee._workflow?.workflow_id || employee.id;
+
+  useEffect(() => {
+    const loadWorkflow = async () => {
+      if (!employee._workflow?.workflow_id) return;
+      try {
+        const w = await getWorkflow(employee._workflow.workflow_id);
+        if (w.completed_steps) {
+          const completedStepNames = w.completed_steps.map((s: any) =>
+            typeof s === 'string' ? s : s.step
+          );
+          setHrTasks(prev => prev.map(task => {
+            const stepMap: Record<string, string> = {
+              'hr1': 'create_employee_record',
+              'hr2': 'create_laptop_request',
+              'hr3': 'create_email_account',
+              'hr4': 'create_payroll_setup',
+              'hr5': 'request_building_access',
+            };
+            const mappedStep = stepMap[task.id];
+            if (mappedStep && completedStepNames.includes(mappedStep)) {
+              return { ...task, status: 'Completed' };
+            }
+            return task;
+          }));
+        }
+      } catch {}
+    };
+    loadWorkflow();
+  }, [employee._workflow?.workflow_id]);
 
   const [tasks, setTasks] = useState<TaskWithIcon[]>([
     {

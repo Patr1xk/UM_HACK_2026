@@ -1,19 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { createPortal } from 'react-dom';
-import { 
-  Users, 
-  Search, 
-  Filter, 
-  MoreHorizontal, 
-  FileText, 
-  Download, 
-  CheckCircle2, 
-  XOctagon, 
-  Clock 
+import {
+  Users,
+  Search,
+  Filter,
+  MoreHorizontal,
+  FileText,
+  Download,
+  CheckCircle2,
+  XOctagon,
+  Clock
 } from 'lucide-react';
 import InterviewSchedulingView from './InterviewSchedulingView';
 import AutomatedRejectionView from './AutomatedRejectionView';
+import { listWorkflows, getScreeningResults } from '../api';
+import type { WorkflowResponse } from '../types/api';
 
 const FADE_UP_ANIMATION = {
   hidden: { opacity: 0, y: 8 },
@@ -49,17 +51,45 @@ const INITIAL_CANDIDATES = [
   { id: '1083', name: 'James Kim', role: 'Backend Engineer', score: 72, status: 'Review', date: 'Oct 21, 2026', source: 'Direct' },
 ];
 
-export default function ResumeDatabaseView({ 
+export default function ResumeDatabaseView({
   onViewCandidate,
   onAdvanceSchedule,
   onAdvanceReject
-}: { 
+}: {
   onViewCandidate?: (candidate: any) => void;
   onAdvanceSchedule?: (candidate: any) => void;
   onAdvanceReject?: (candidate: any) => void;
 }) {
   const [candidatesData, setCandidatesData] = useState(INITIAL_CANDIDATES);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Fetch real screening results from backend
+  useEffect(() => {
+    const fetchCandidates = async () => {
+      try {
+        const workflows = await listWorkflows({ workflow_type: 'resume_screening' });
+        const completed = workflows.filter((w: WorkflowResponse) =>
+          w.status === 'completed' || w.runtime_data?.candidate
+        );
+        if (completed.length > 0) {
+          const realCandidates = completed.map((w: WorkflowResponse) => ({
+            id: w.workflow_id,
+            name: w.runtime_data?.candidate?.name || w.runtime_data?.resume_filename || 'Unknown',
+            role: w.entities?.job_role || 'Unknown',
+            score: w.runtime_data?.match_score || 0,
+            status: w.runtime_data?.decision === 'shortlisted' ? 'Interview' : w.runtime_data?.decision === 'rejected' ? 'Rejected' : 'Screening',
+            date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            source: 'GLM Pipeline',
+            _workflow: w,
+          }));
+          setCandidatesData([...realCandidates, ...INITIAL_CANDIDATES]);
+        }
+      } catch {
+        // Keep mock data as fallback
+      }
+    };
+    fetchCandidates();
+  }, []);
   const [showAdvanceModal, setShowAdvanceModal] = useState<any>(null);
   const [activeModal, setActiveModal] = useState<'none' | 'schedule' | 'reject'>('none');
   const [activeCandidate, setActiveCandidate] = useState<any>(null);

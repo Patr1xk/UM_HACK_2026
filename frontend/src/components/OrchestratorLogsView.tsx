@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Activity, Clock, Terminal, Search, ChevronRight, CheckCircle2, AlertTriangle, Info, XOctagon, ZoomIn, ZoomOut, ChevronLeft, BarChart2, ChevronDown, Maximize2, HelpCircle, Loader2 } from 'lucide-react';
 import { BarChart, Bar, ResponsiveContainer, XAxis, Tooltip } from 'recharts';
+import { listWorkflows } from '../api';
+import type { WorkflowResponse } from '../types/api';
 
 const generateTimelineData = () => Array.from({ length: 48 }).map((_, i) => ({
   time: `15:${String(i).padStart(2, '0')}`,
@@ -95,6 +97,56 @@ export default function OrchestratorLogsView() {
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 10;
 
+  // Real workflow data
+  const [realLogs, setRealLogs] = useState<any[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  useEffect(() => {
+    const fetchWorkflowLogs = async () => {
+      setIsLoadingLogs(true);
+      try {
+        const workflows = await listWorkflows();
+        const logs: any[] = [];
+        for (const w of workflows) {
+          const actionLogs = w.action_logs || [];
+          for (const log of actionLogs) {
+            const stepName = typeof log === 'object' ? (log.step || 'unknown') : String(log);
+            const status = typeof log === 'object' ? log.status : 'success';
+            const message = typeof log === 'object' ? log.message : `${stepName} completed`;
+            logs.push({
+              id: `${w.workflow_id}-${stepName}`,
+              timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              level: status === 'failed' ? 'ERROR' : status === 'paused' ? 'WARN' : 'SUCCESS',
+              module: stepName.replace(/_/g, '').toUpperCase().slice(0, 20),
+              message: `[${w.workflow_type}] ${message}`,
+              payload: JSON.stringify(log, null, 2),
+            });
+          }
+          // Add workflow-level log
+          logs.push({
+            id: w.workflow_id,
+            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            level: w.status === 'failed' ? 'ERROR' : w.status === 'awaiting_clarification' ? 'WARN' : 'INFO',
+            module: 'GLM_ORCHESTRATOR',
+            message: `Workflow ${w.workflow_id}: ${w.intent_summary} (${w.status})`,
+            payload: JSON.stringify({ workflow_id: w.workflow_id, type: w.workflow_type, status: w.status, entities: w.entities, confidence: w.confidence }, null, 2),
+          });
+        }
+        if (logs.length > 0) {
+          setRealLogs(logs);
+          if (logs.length > 0) setSelectedLog(logs[0]);
+        }
+      } catch {
+        // Keep mock data as fallback
+      } finally {
+        setIsLoadingLogs(false);
+      }
+    };
+    fetchWorkflowLogs();
+  }, []);
+
+  const allLogs = realLogs.length > 0 ? [...realLogs, ...LOG_MOCK_DATA] : LOG_MOCK_DATA;
+
   const handleTimeChange = (val: string) => {
     setTimeFilter(val);
     setTimelineData(generateTimelineData());
@@ -106,7 +158,7 @@ export default function OrchestratorLogsView() {
     setTimeout(() => setIsAnalyzing(false), 2000);
   };
 
-  const filteredLogs = LOG_MOCK_DATA.filter(log => {
+  const filteredLogs = allLogs.filter(log => {
     const matchesFilter = filter === 'ALL' || log.level === filter;
     const matchesSearch = 
       log.message.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -292,7 +344,7 @@ export default function OrchestratorLogsView() {
 
         {/* Bottom Actions Bar */}
         <div className="flex items-center justify-between px-6 py-3 border-t border-white/5 bg-zinc-900/50">
-          <span className="text-[13px] font-semibold text-zinc-300 tracking-tight">349 results</span>
+          <span className="text-[13px] font-semibold text-zinc-300 tracking-tight">{filteredLogs.length} results</span>
           <div className="flex items-center gap-7">
             <button 
               onClick={handleAnalyze}

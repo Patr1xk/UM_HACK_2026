@@ -1,7 +1,7 @@
 from glm.extractor import extract_request, generate_clarification, merge_partial_entities, decide_onboarding_steps
 from schemas.schemas import ExtractedRequest
 from orchestrator.orchestrator import build_workflow, execute_onboarding_workflow
-from db.sqlite_store import save_workflow, get_workflow
+from db.sqlite_store import save_workflow, get_workflow, list_workflows
 from logic.screening import (
     init_screening_tables,
     get_all_roles,
@@ -130,6 +130,11 @@ def _check_onboarding_prerequisites(extracted: ExtractedRequest) -> list[str]:
 def fetch_workflow(workflow_id: str):
     """Fetch workflow by ID."""
     return get_workflow(workflow_id)
+
+
+def fetch_workflows(workflow_type: str = None, status: str = None) -> list[dict]:
+    """Fetch all workflows, optionally filtered by type and status."""
+    return list_workflows(workflow_type, status)
 
 
 # ---------------------------------------------------------------------------

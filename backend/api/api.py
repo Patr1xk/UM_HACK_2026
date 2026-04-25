@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from typing import Optional
 
-from services.services import process_user_request, fetch_workflow, resume_workflow_with_clarification
+from services.services import process_user_request, fetch_workflow, fetch_workflows, resume_workflow_with_clarification
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 
@@ -23,6 +24,12 @@ def start_workflow(payload: WorkflowStartRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/")
+def list_all_workflows(workflow_type: Optional[str] = Query(None), status: Optional[str] = Query(None)):
+    """List all workflows, optionally filtered by type and/or status."""
+    return fetch_workflows(workflow_type, status)
 
 
 @router.post("/clarify")

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UploadCloud, FileText, X, AlertCircle, Play, FileIcon, Briefcase } from 'lucide-react';
+import { runScreening } from '../api';
+import type { WorkflowResponse } from '../types/api';
 
 const formatFileSize = (bytes: number) => {
   if (bytes === 0) return '0 Bytes';
@@ -10,12 +12,13 @@ const formatFileSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-export default function ResumeScreeningView({ onAnalysisComplete }: { onAnalysisComplete?: () => void }) {
+export default function ResumeScreeningView({ onAnalysisComplete }: { onAnalysisComplete?: (results?: WorkflowResponse[]) => void }) {
   const [phase, setPhase] = useState<'upload' | 'config' | 'processing'>('upload');
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [roleTitle, setRoleTitle] = useState('');
+  const [screeningResults, setScreeningResults] = useState<WorkflowResponse[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const MAX_FILES = 5;
@@ -76,15 +79,55 @@ export default function ResumeScreeningView({ onAnalysisComplete }: { onAnalysis
     });
   };
 
-  const startExtraction = () => {
+  const startExtraction = async () => {
     setPhase('processing');
+    setScreeningResults([]);
+
+    const results: WorkflowResponse[] = [];
+    for (const file of files) {
+      try {
+        const formData = new FormData();
+        const workflowId = `rs_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        formData.append('workflow_id', workflowId);
+        formData.append('role_name', roleTitle);
+        formData.append('resume', file);
+        const result = await runScreening(formData);
+        results.push(result);
+      } catch (err: any) {
+        results.push({
+          workflow_id: `err_${Date.now()}`,
+          workflow_type: 'resume_screening',
+          status: 'failed',
+          intent_summary: `Failed to screen ${file.name}`,
+          confidence: 0,
+          entities: { employee_name: '', department: '', start_date: '', resources_needed: [], job_role: '', required_skills: [], minimum_experience_years: 0, candidate_count: 0, requirement_source: 'unknown', job_description_provided: false },
+          missing_fields: [],
+          next_action: 'fallback',
+          steps: [],
+          current_step_index: 0,
+          completed_steps: [],
+          failed_steps: [{ step: 'upload', message: err.message || 'Upload failed' }],
+          runtime_data: {},
+          action_logs: [],
+          clarification: {},
+          user_clarification: {},
+        });
+      }
+    }
+    setScreeningResults(results);
   };
 
   const isExceeded = files.length > MAX_FILES;
   const isReady = files.length > 0 && files.length <= MAX_FILES && roleTitle.trim().length > 0;
 
   if (phase === 'processing') {
-    return <ScannerView onComplete={() => onAnalysisComplete && onAnalysisComplete()} />;
+    return (
+      <ScannerView
+        results={screeningResults}
+        totalFiles={files.length}
+        onComplete={() => onAnalysisComplete && onAnalysisComplete(screeningResults)}
+      />
+    );
   }
 
   return (
@@ -250,38 +293,45 @@ export default function ResumeScreeningView({ onAnalysisComplete }: { onAnalysis
   );
 }
 
-function ScannerView({ onComplete }: { onComplete: () => void }) {
-  const [status, setStatus] = useState("Preparing...");
-  const [subTask, setSubTask] = useState("");
+function ScannerView({ results, totalFiles, onComplete }: { results: WorkflowResponse[]; totalFiles: number; onComplete: () => void }) {
+  const [status, setStatus] = useState("Processing...");
+  const [subTask, setSubTask] = useState("Uploading resumes to GLM pipeline...");
   const [hashes, setHashes] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
+  const hasCompleted = useRef(false);
+
+  const allDone = results.length === totalFiles && totalFiles > 0;
 
   useEffect(() => {
-    const t1 = setTimeout(() => setStatus("Setting up..."), 2000);
-    const t2 = setTimeout(() => setStatus("Setting up complete"), 4500);
-    const t3 = setTimeout(() => onComplete(), 5500);
-    
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, [onComplete]);
+    if (allDone && !hasCompleted.current) {
+      hasCompleted.current = true;
+      setStatus("Complete");
+      setSubTask("All resumes processed. Click to view results.");
+      setProgress(100);
+      const t = setTimeout(() => onComplete(), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [allDone, onComplete]);
 
   useEffect(() => {
+    if (allDone) return;
     const tasks = [
       'Parsing unstructured document layers...',
-      'Normalizing font geometries...',
       'Extracting semantic entity logic...',
-      'Routing to GLM-4 inference enclave...',
+      'Routing to GLM inference engine...',
       'Computing alignment vectors...',
-      'Structuring JSON matrices...',
-      'Optimizing final heuristics...'
+      'Evaluating candidate fit...',
+      'Deciding candidate outcome...',
+      'Scheduling & notifications...',
     ];
     let idx = 0;
     setSubTask(tasks[0]);
     const interval = setInterval(() => {
       idx++;
       setSubTask(tasks[idx % tasks.length]);
-    }, 450);
+    }, 600);
     return () => clearInterval(interval);
-  }, []);
+  }, [allDone]);
 
   useEffect(() => {
     const generateHashes = () => {
@@ -295,39 +345,32 @@ function ScannerView({ onComplete }: { onComplete: () => void }) {
   }, []);
 
   useEffect(() => {
+    if (allDone) return;
     const start = Date.now();
-    const duration = 5500;
     const interval = setInterval(() => {
       const elapsed = Date.now() - start;
-      const p = Math.min((elapsed / duration) * 100, 100);
-      setProgress(p);
-    }, 50);
+      const base = (results.length / totalFiles) * 80;
+      const timeBonus = Math.min((elapsed / 30000) * 20, 20);
+      setProgress(Math.min(base + timeBonus, 95));
+    }, 100);
     return () => clearInterval(interval);
-  }, []);
+  }, [results.length, totalFiles, allDone]);
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="flex flex-col items-center justify-center min-h-[600px] w-full max-w-5xl mx-auto relative z-10 overflow-hidden rounded-3xl"
     >
-      {/* Background Data Matrix */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff05_1px,transparent_1px),linear-gradient(to_bottom,#ffffff05_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
-      
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[10rem] md:text-[14rem] font-black text-white/[0.02] whitespace-nowrap pointer-events-none tracking-tighter select-none">
         ANALYSIS_V4
       </div>
-
-      {/* Main Center Glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-purple-600/10 blur-[150px] rounded-full pointer-events-none" />
 
-
-
-      {/* CENTER MANIFOLD */}
       <div className="flex flex-col items-center z-20 w-full max-w-lg mt-8">
-        {/* Massive Typography */}
         <AnimatePresence mode="wait">
-          <motion.h2 
+          <motion.h2
             key={status}
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -339,43 +382,56 @@ function ScannerView({ onComplete }: { onComplete: () => void }) {
           </motion.h2>
         </AnimatePresence>
 
-        {/* Sub-Task Terminal Strip */}
         <div className="h-8 mt-4 mb-10 flex items-center justify-center w-full px-6 bg-zinc-950/40 border border-white/5 rounded-full backdrop-blur-sm max-w-sm">
           <p className="text-purple-400 font-mono text-xs tracking-widest uppercase overflow-hidden whitespace-nowrap text-ellipsis inline-block">
             <span className="opacity-40 select-none mr-2">sys&gt;</span>{subTask}
           </p>
         </div>
 
-        {/* Document Scanner UI */}
         <div className="relative w-64 h-80 bg-zinc-950/90 backdrop-blur-xl border border-white/5 rounded-2xl shadow-[0_0_80px_rgba(168,85,247,0.15)] flex flex-col items-center pt-10 pb-8 px-6 overflow-hidden z-10 ring-1 ring-white/10">
-          
-          {/* Placeholder Document Elements */}
           <div className="w-[85%] h-3 bg-zinc-800 rounded-full mb-8 self-start shadow-inner" />
-          
           <div className="w-full flex flex-col gap-3">
             <div className="w-full h-2 bg-zinc-800/60 rounded-full" />
             <div className="w-[90%] h-2 bg-zinc-800/60 rounded-full" />
             <div className="w-[95%] h-2 bg-zinc-800/60 rounded-full" />
             <div className="w-[70%] h-2 bg-zinc-800/60 rounded-full mb-4" />
-
             <div className="w-[60%] h-2 bg-zinc-800/60 rounded-full block" />
             <div className="w-full h-2 bg-zinc-800/60 rounded-full" />
             <div className="w-[85%] h-2 bg-zinc-800/60 rounded-full" />
           </div>
 
-          {/* The Sweeping Scanner Line */}
-          <motion.div
-            animate={{ top: ['-10%', '110%', '-10%'] }}
-            transition={{ duration: 2.2, ease: 'linear', repeat: Infinity }}
-            className="absolute left-0 right-0 h-[2px] bg-purple-400 shadow-[0_0_20px_4px_rgba(168,85,247,0.8)] z-20"
-          />
-          {/* Glowing Gradient below the scanner line */}
-          <motion.div
-            animate={{ top: ['-10%', '110%', '-10%'] }}
-            transition={{ duration: 2.2, ease: 'linear', repeat: Infinity }}
-            className="absolute left-0 right-0 h-40 bg-gradient-to-t from-purple-500/0 via-purple-500/10 to-purple-500/30 -translate-y-full z-10 pointer-events-none"
-          />
+          {!allDone && (
+            <>
+              <motion.div
+                animate={{ top: ['-10%', '110%', '-10%'] }}
+                transition={{ duration: 2.2, ease: 'linear', repeat: Infinity }}
+                className="absolute left-0 right-0 h-[2px] bg-purple-400 shadow-[0_0_20px_4px_rgba(168,85,247,0.8)] z-20"
+              />
+              <motion.div
+                animate={{ top: ['-10%', '110%', '-10%'] }}
+                transition={{ duration: 2.2, ease: 'linear', repeat: Infinity }}
+                className="absolute left-0 right-0 h-40 bg-gradient-to-t from-purple-500/0 via-purple-500/10 to-purple-500/30 -translate-y-full z-10 pointer-events-none"
+              />
+            </>
+          )}
         </div>
+
+        {/* Results summary if available */}
+        {results.length > 0 && (
+          <div className="mt-6 w-full max-w-sm space-y-2">
+            {results.map((r, idx) => (
+              <div key={r.workflow_id} className="flex items-center gap-2 bg-zinc-900/50 border border-white/5 rounded-lg px-3 py-2">
+                <span className={`text-xs font-bold ${r.status === 'completed' ? 'text-emerald-400' : r.status === 'failed' ? 'text-rose-400' : 'text-amber-400'}`}>
+                  {r.status === 'completed' ? 'DONE' : r.status === 'failed' ? 'FAIL' : '...'}
+                </span>
+                <span className="text-xs text-zinc-400">
+                  {r.runtime_data?.candidate?.name || r.runtime_data?.resume_filename || `Resume ${idx + 1}`}
+                  {r.runtime_data?.match_score != null && ` — ${r.runtime_data.match_score}%`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );

@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, 
-  Filter, 
-  MoreHorizontal, 
-  Play, 
+import {
+  Search,
+  Filter,
+  MoreHorizontal,
+  Play,
   Video,
   User,
   Clock,
@@ -12,6 +12,8 @@ import {
   Calendar,
   Star
 } from 'lucide-react';
+import { listWorkflows } from '../api';
+import type { WorkflowResponse } from '../types/api';
 
 const FADE_UP_ANIMATION = {
   hidden: { opacity: 0, y: 8 },
@@ -62,9 +64,41 @@ export default function InterviewHubView({ onViewInterview }: { onViewInterview?
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
+  const [realInterviews, setRealInterviews] = useState<any[]>([]);
   const itemsPerPage = 5;
 
-  const filteredInterviews = interviews.filter(i => {
+  useEffect(() => {
+    const fetchInterviews = async () => {
+      try {
+        const workflows = await listWorkflows({ workflow_type: 'resume_screening' });
+        const interviewWorkflows = workflows.filter((w: WorkflowResponse) =>
+          w.runtime_data?.interview_info || w.runtime_data?.decision === 'shortlisted'
+        );
+        const mapped = interviewWorkflows.map((w: WorkflowResponse) => ({
+          id: w.workflow_id,
+          name: w.runtime_data?.candidate?.name || w.runtime_data?.resume_filename || 'Unknown',
+          role: w.entities?.job_role || 'Unknown',
+          score: w.runtime_data?.match_score || 0,
+          status: w.status === 'completed' ? 'Evaluated' : 'Awaiting HR Review',
+          date: w.runtime_data?.interview_info?.display_time || 'TBD',
+          hr: { name: 'GLM Agent', img: '' },
+          thumb: '',
+          recordingUrl: null,
+          _workflow: w,
+        }));
+        if (mapped.length > 0) {
+          setRealInterviews(mapped);
+        }
+      } catch {
+        // Keep mock data as fallback
+      }
+    };
+    fetchInterviews();
+  }, []);
+
+  const allInterviews = realInterviews.length > 0 ? [...realInterviews, ...interviews] : interviews;
+
+  const filteredInterviews = allInterviews.filter(i => {
     const matchesSearch = i.name.toLowerCase().includes(searchTerm.toLowerCase()) || i.role.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = selectedStatus === 'All' || i.status === selectedStatus;
     return matchesSearch && matchesStatus;

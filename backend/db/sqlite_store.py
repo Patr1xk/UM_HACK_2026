@@ -156,6 +156,37 @@ def get_workflow(workflow_id: str):
     if not row:
         return None
 
+    return _row_to_workflow(row)
+
+
+def list_workflows(workflow_type: str = None, status: str = None) -> list[dict]:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = "SELECT * FROM workflows"
+    conditions = []
+    params = []
+
+    if workflow_type:
+        conditions.append("workflow_type = ?")
+        params.append(workflow_type)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " ORDER BY rowid DESC"
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [_row_to_workflow(row) for row in rows]
+
+
+def _row_to_workflow(row) -> dict:
     return {
         "workflow_id": row[0],
         "workflow_type": row[1],

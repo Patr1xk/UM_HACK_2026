@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Users, 
-  Search, 
-  Filter, 
-  MoreVertical, 
-  CheckCircle2, 
-  Clock, 
+import {
+  Users,
+  Search,
+  Filter,
+  MoreVertical,
+  CheckCircle2,
+  Clock,
   CircleDashed,
   Mail,
   User,
@@ -17,6 +17,8 @@ import {
   ChevronRight,
   CheckCircle
 } from 'lucide-react';
+import { listWorkflows, clarifyWorkflow } from '../api';
+import type { WorkflowResponse } from '../types/api';
 
 // Mock Data
 export const PAGE_DATA: Record<number, any[]> = {
@@ -362,15 +364,17 @@ export default function OnboardingListView({ onSelectEmployee }: { onSelectEmplo
   const [automatingTask, setAutomatingTask] = useState<any | null>(null);
   const [automationProgress, setAutomationProgress] = useState(0);
   const [isAutoPilotOn, setIsAutoPilotOn] = useState(true);
-  
+
   const [currentPage, setCurrentPage] = useState(1);
   const [employees, setEmployees] = useState(PAGE_DATA[1] || []);
-  
+  const [workflows, setWorkflows] = useState<WorkflowResponse[]>([]);
+  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(false);
+
   const [showToggleConfirm, setShowToggleConfirm] = useState(false);
   const [showOverrideConfirm, setShowOverrideConfirm] = useState<any>(null);
   const [showLogsModal, setShowLogsModal] = useState<any>(null);
   const [showAlreadyAutomatedWarning, setShowAlreadyAutomatedWarning] = useState<any>(null);
-  
+
   // Missing details state
   const [fillingDetailsFor, setFillingDetailsFor] = useState<any | null>(null);
   const [missingDetailsForm, setMissingDetailsForm] = useState<Record<string, string>>({});
@@ -381,6 +385,52 @@ export default function OnboardingListView({ onSelectEmployee }: { onSelectEmplo
   useEffect(() => {
     setEmployees(PAGE_DATA[currentPage] || []);
   }, [currentPage]);
+
+  // Fetch real onboarding workflows from backend
+  useEffect(() => {
+    const fetchOnboardingWorkflows = async () => {
+      setIsLoadingWorkflows(true);
+      try {
+        const result = await listWorkflows({ workflow_type: 'onboarding' });
+        setWorkflows(result);
+        if (result.length > 0) {
+          const mapped = result.map(w => {
+            const ent = w.entities || {};
+            const totalSteps = w.steps?.length || 0;
+            const completedCount = w.completed_steps?.length || 0;
+            const progress = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
+            const isAwaiting = w.status === 'awaiting_clarification';
+            const missingFields = w.clarification?.missing_fields || w.missing_fields || [];
+            return {
+              id: w.workflow_id,
+              name: ent.employee_name || 'To Be Assigned',
+              email: w.runtime_data?.email_address || 'To Be Assigned',
+              department: ent.department || 'To Be Assigned',
+              role: ent.job_role || 'To Be Assigned',
+              startDate: ent.start_date || 'To Be Assigned',
+              status: w.status === 'completed' ? 'Completed' : isAwaiting ? 'Pending' : 'In Progress',
+              progress: w.status === 'completed' ? 100 : progress,
+              manager: 'To Be Assigned',
+              agentActivity: isAwaiting
+                ? `Missing: ${missingFields.join(', ')}`
+                : w.status === 'completed'
+                  ? 'Onboarding complete.'
+                  : `${completedCount}/${totalSteps} steps done`,
+              agentIcon: isAwaiting ? 'warning' : w.status === 'completed' ? 'check' : 'spinner',
+              agentColor: isAwaiting ? 'text-amber-500' : w.status === 'completed' ? 'text-emerald-500' : 'text-purple-400',
+              _workflow: w,
+            };
+          });
+          setEmployees(mapped);
+        }
+      } catch (err) {
+        // Keep mock data as fallback
+      } finally {
+        setIsLoadingWorkflows(false);
+      }
+    };
+    fetchOnboardingWorkflows();
+  }, []);
 
   const handleToggleClick = () => {
     if (isAutoPilotOn) {
@@ -1047,18 +1097,73 @@ export default function OnboardingListView({ onSelectEmployee }: { onSelectEmplo
                       Cancel
                     </button>
                     <button 
-                      onClick={() => {
+                      onClick={async () => {
                         setIsSubmittingDetails(true);
                         setSetupStep(0);
-                        
-                        // Fake steps for the animation
+
+                        // If this employee has a real workflow, call the clarification API
+                        const workflow = fillingDetailsFor?._workflow;
+                        if (workflow?.workflow_id) {
+                          try {
+                            // Build a natural language response from the form
+                            const parts: string[] = [];
+                            if (missingDetailsForm.name) parts.push(`Name: ${missingDetailsForm.name}`);
+                            if (missingDetailsForm.department) parts.push(`Department: ${missingDetailsForm.department}`);
+                            if (missingDetailsForm.startDate) parts.push(`Start date: ${missingDetailsForm.startDate}`);
+                            const clarificationText = parts.join(', ');
+
+                            const result = await clarifyWorkflow(workflow.workflow_id, clarificationText);
+
+                            const totalSteps = result.steps?.length || 0;
+                            const completedCount = result.completed_steps?.length || 0;
+                            const updatedEmployee = {
+                              ...fillingDetailsFor,
+                              name: result.entities?.employee_name || fillingDetailsFor.name,
+                              department: result.entities?.department || fillingDetailsFor.department,
+                              startDate: result.entities?.start_date || fillingDetailsFor.startDate,
+                              status: result.status === 'completed' ? 'Completed' : 'In Progress',
+                              progress: result.status === 'completed' ? 100 : (totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0),
+                              agentActivity: result.status === 'completed'
+                                ? 'Onboarding complete.'
+                                : result.status === 'awaiting_clarification'
+                                  ? `Still missing: ${(result.clarification?.missing_fields || []).join(', ')}`
+                                  : `${completedCount}/${totalSteps} steps done`,
+                              agentIcon: result.status === 'completed' ? 'check' : result.status === 'awaiting_clarification' ? 'warning' : 'mail',
+                              agentColor: result.status === 'completed' ? 'text-emerald-500' : result.status === 'awaiting_clarification' ? 'text-amber-500' : 'text-yellow-500',
+                              _workflow: result,
+                            };
+                            setEmployees(prev => prev.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp));
+                            setFillingDetailsFor(null);
+                            if (result.status !== 'awaiting_clarification') {
+                              setShowOnboardingSentFor(updatedEmployee);
+                            }
+                          } catch (err) {
+                            // Fallback: just update local state
+                            const updatedEmployee = {
+                              ...fillingDetailsFor,
+                              ...missingDetailsForm,
+                              status: 'In Progress',
+                              progress: 0,
+                              agentActivity: 'Onboarding Email Sent. Awaiting Employee Action.',
+                              agentIcon: 'mail',
+                              agentColor: 'text-yellow-500',
+                            };
+                            setEmployees(prev => prev.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp));
+                            setFillingDetailsFor(null);
+                            setShowOnboardingSentFor(updatedEmployee);
+                          }
+                          setIsSubmittingDetails(false);
+                          return;
+                        }
+
+                        // Fallback for mock data (no real workflow)
                         const steps = [
                           "Generating Onboarding Roadmap...",
                           "Auto-configuring IT Permissions...",
                           "Syncing HR Records...",
                           "Finalizing Welcome Package..."
                         ];
-                        
+
                         let currentStep = 0;
                         const interval = setInterval(() => {
                           currentStep++;
@@ -1067,22 +1172,19 @@ export default function OnboardingListView({ onSelectEmployee }: { onSelectEmplo
                           } else {
                             clearInterval(interval);
                             setIsSubmittingDetails(false);
-                            
-                            // Update the mock data or state list
-                            // User requested status starts from 0
-                            const updatedEmployee = { 
-                              ...fillingDetailsFor, 
-                              ...missingDetailsForm, 
-                              status: 'In Progress', 
-                              progress: 0, 
+
+                            const updatedEmployee = {
+                              ...fillingDetailsFor,
+                              ...missingDetailsForm,
+                              status: 'In Progress',
+                              progress: 0,
                               agentActivity: 'Onboarding Email Sent. Awaiting Employee Action.',
                               agentIcon: 'mail',
                               agentColor: 'text-yellow-500'
                             };
                             setEmployees(prev => prev.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp));
                             setFillingDetailsFor(null);
-                            
-                            // Show the final confirmation
+
                             setShowOnboardingSentFor(updatedEmployee);
                           }
                         }, 1200);

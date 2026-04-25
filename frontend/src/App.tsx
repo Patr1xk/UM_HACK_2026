@@ -40,6 +40,7 @@ import OrchestratorLogsView from './components/OrchestratorLogsView';
 
 import OnboardingListView from './components/OnboardingListView';
 import OnboardingDetailView from './components/OnboardingDetailView';
+import GlmChatWidget from './components/GlmChatWidget';
 
 const FADE_UP_ANIMATION = {
   hidden: { opacity: 0, y: 8 },
@@ -322,6 +323,8 @@ export default function App() {
           )}
         </div>
       </main>
+
+      <GlmChatWidget />
     </div>
   );
 }
